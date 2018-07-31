@@ -9,7 +9,7 @@ from tf_utils import (
     time_distributed_dense_layer, temporal_convolution_layer,
     sequence_mean, sequence_smape, shape
 )
-
+import pdb
 
 class DataReader(object):
 
@@ -29,9 +29,9 @@ class DataReader(object):
         self.test_df = DataFrame(columns=data_cols, data=data)
         self.train_df, self.val_df = self.test_df.train_test_split(train_size=0.95)
 
-        print 'train size', len(self.train_df)
-        print 'val size', len(self.val_df)
-        print 'test size', len(self.test_df)
+        print ('train size', len(self.train_df))
+        print ('val size', len(self.val_df))
+        print( 'test size', len(self.test_df))
 
     def train_batch_generator(self, batch_size):
         return self.batch_generator(
@@ -47,7 +47,7 @@ class DataReader(object):
             batch_size=batch_size,
             df=self.val_df,
             shuffle=True,
-            num_epochs=10000,
+            num_epochs=128,
             is_test=False
         )
 
@@ -56,7 +56,7 @@ class DataReader(object):
             batch_size=batch_size,
             df=self.test_df,
             shuffle=True,
-            num_epochs=1,
+            num_epochs=10000,
             is_test=True
         )
 
@@ -394,7 +394,7 @@ if __name__ == '__main__':
         optimizer='adam',
         learning_rate=.001,
         batch_size=128,
-        num_training_steps=200000,
+        num_training_steps=10,
         early_stopping_steps=5000,
         warm_start_init_step=0,
         regularization_constant=0.0,

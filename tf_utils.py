@@ -19,7 +19,8 @@ def temporal_convolution_layer(inputs, output_units, convolution_width, causal=F
     """
     with tf.variable_scope(scope, reuse=reuse):
         if causal:
-            shift = (convolution_width / 2) + (int(dilation_rate[0] - 1) / 2)
+            # sqw update int
+            shift = int((convolution_width / 2) + (int(dilation_rate[0] - 1) / 2))
             pad = tf.zeros([tf.shape(inputs)[0], shift, inputs.shape.as_list()[2]])
             inputs = tf.concat([pad, inputs], axis=1)
 
