@@ -102,7 +102,7 @@ class DataReader(object):
 
             yield batch
 
-
+gal =0
 class cnn(TFBaseModel):
 
     def __init__(
@@ -254,6 +254,7 @@ class cnn(TFBaseModel):
         # initialize state tensor arrays
         state_queues = []
         for i, (conv_input, dilation) in enumerate(zip(conv_inputs, self.dilations)):
+            print('1111111111111111111111_{}'.format(i))
             # batch_size 标量
             batch_idx = tf.range(batch_size)
             # shape:(batch_size,dilation) 例如：dilation =4
@@ -291,6 +292,7 @@ class cnn(TFBaseModel):
         initial_input = tf.gather_nd(x, current_idx)
 
         def loop_fn(time, current_input, queues):
+            print('222222222222222222222222222222')
             current_features = features_ta.read(time)
             current_input = tf.concat([current_input, current_features], axis=1)
 
@@ -330,7 +332,7 @@ class cnn(TFBaseModel):
                 w_y = tf.get_variable('weights')
                 b_y = tf.get_variable('biases')
                 y_hat = tf.matmul(h, w_y) + b_y
-
+            print('33333333333333333333333333332')
             elements_finished = (time >= self.decode_len)
             finished = tf.reduce_all(elements_finished)
 
@@ -340,13 +342,14 @@ class cnn(TFBaseModel):
                 lambda: y_hat
             )
             next_elements_finished = (time >= self.decode_len - 1)
-
+            print('3333333333333333333333333333444')
             return (next_elements_finished, next_input, updated_queues)
 
         def condition(unused_time, elements_finished, *_):
             return tf.logical_not(tf.reduce_all(elements_finished))
 
         def body(time, elements_finished, emit_ta, *state_queues):
+            print("***********************************************")
             (next_finished, emit_output, state_queues) = loop_fn(time, initial_input, state_queues)
 
             emit = tf.where(elements_finished, tf.zeros_like(emit_output), emit_output)

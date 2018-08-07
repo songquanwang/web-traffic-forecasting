@@ -113,16 +113,16 @@ class TFBaseModel(object):
             else:
                 self.session.run(self.init)
                 step = 0
-
+            # 128
             train_generator = self.reader.train_batch_generator(self.batch_size)
             val_generator = self.reader.val_batch_generator(self.num_validation_batches*self.batch_size)
-
+            # 100,100
             train_loss_history = deque(maxlen=self.loss_averaging_window)
             val_loss_history = deque(maxlen=self.loss_averaging_window)
-
+            # inf ,0
             best_validation_loss, best_validation_tstep = float('inf'), 0
             restarts = 0
-
+            # 10
             while step < self.num_training_steps:
 
                 # validation evaluation sqw update
@@ -139,11 +139,13 @@ class TFBaseModel(object):
                     val_feed_dict.update({self.keep_prob: 1.0})
                 if hasattr(self, 'is_training'):
                     val_feed_dict.update({self.is_training: False})
-
+                # 这里报错？？？？？
+                print("err_before*************************")
                 [val_loss] = self.session.run(
                     fetches=[self.loss],
                     feed_dict=val_feed_dict
                 )
+                print("err_after*************************")
                 val_loss_history.append(val_loss)
 
                 if hasattr(self, 'monitor_tensors'):
