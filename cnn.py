@@ -78,6 +78,7 @@ class DataReader(object):
             y_decode = np.zeros([len(batch), num_decode_steps])
             is_nan_encode = np.zeros([len(batch), max_encode_length])
             is_nan_decode = np.zeros([len(batch), num_decode_steps])
+            #[0,0,....,0] batch_size个0
             encode_len = np.zeros([len(batch)])
             decode_len = np.zeros([len(batch)])
 
@@ -253,15 +254,21 @@ class cnn(TFBaseModel):
         # initialize state tensor arrays
         state_queues = []
         for i, (conv_input, dilation) in enumerate(zip(conv_inputs, self.dilations)):
+            # batch_size 标量
             batch_idx = tf.range(batch_size)
+            # shape:(batch_size,dilation) 例如：dilation =4
             batch_idx = tf.tile(tf.expand_dims(batch_idx, 1), (1, dilation))
+            # -1 reshape 1-D   512
             batch_idx = tf.reshape(batch_idx, [-1])
-
+            # (128) 负数
             queue_begin_time = self.encode_len - dilation - 1
+            # (128,1)+(1,4) = (128,4)   例如：[-5., -4., -3., -2.]]
             temporal_idx = tf.expand_dims(queue_begin_time, 1) + tf.expand_dims(tf.range(dilation), 0)
+            # 1D  =[512]
             temporal_idx = tf.reshape(temporal_idx, [-1])
-
+            # (512,2)
             idx = tf.stack([batch_idx, temporal_idx], axis=1)
+            # (512,32) gather 行=idx 列 conv_input---->(128,4,32)
             slices = tf.reshape(tf.gather_nd(conv_input, idx), (batch_size, dilation, shape(conv_input, 2)))
 
             layer_ta = tf.TensorArray(dtype=tf.float32, size=dilation + self.num_decode_steps)
