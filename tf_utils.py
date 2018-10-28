@@ -28,7 +28,7 @@ def temporal_convolution_layer(inputs, output_units, convolution_width, causal=F
             name='weights',
             initializer=tf.random_normal_initializer(
                 mean=0,
-                stddev=1.0 / tf.sqrt(float(convolution_width)*float(shape(inputs, 2)))
+                stddev=1.0 / tf.sqrt(float(convolution_width) * float(shape(inputs, 2)))
             ),
             shape=[convolution_width, shape(inputs, 2), output_units]
         )
@@ -97,18 +97,25 @@ def shape(tensor, dim=None):
 def sequence_smape(y, y_hat, sequence_lengths, is_nan):
     max_sequence_length = tf.shape(y)[1]
     y = tf.cast(y, tf.float32)
-    smape = 2*(tf.abs(y_hat - y) / (tf.abs(y) + tf.abs(y_hat)))
+    smape = 2 * (tf.abs(y_hat - y) / (tf.abs(y) + tf.abs(y_hat)))
 
     # ignore discontinuity
-    zero_loss = 2.0*tf.ones_like(smape)
+    zero_loss = 2.0 * tf.ones_like(smape)
     nonzero_loss = smape
+    # 预测值或者真实值有一个为零，smape则为0
     smape = tf.where(tf.logical_or(tf.equal(y, 0.0), tf.equal(y_hat, 0.0)), zero_loss, nonzero_loss)
-
+    # (?,?)
     sequence_mask = tf.cast(tf.sequence_mask(sequence_lengths, maxlen=max_sequence_length), tf.float32)
-    sequence_mask = sequence_mask*(1 - is_nan)
-    avg_smape = tf.reduce_sum(smape*sequence_mask) / tf.reduce_sum(sequence_mask)
+    sequence_mask = sequence_mask * (1 - is_nan)
+    avg_smape = tf.reduce_sum(smape * sequence_mask) / tf.reduce_sum(sequence_mask)
     return avg_smape
 
 
 def sequence_mean(x, lengths):
+    """
+    按照实际长度求平均值 为什么不用 reduce_mean?
+    :param x:
+    :param lengths:
+    :return:
+    """
     return tf.reduce_sum(x, axis=1) / tf.cast(lengths, tf.float32)

@@ -189,7 +189,9 @@ class cnn(TFBaseModel):
         self,
         residual_channels=32,
         skip_channels=32,
+        # [1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128] 24层
         dilations=[2**i for i in range(8)]*3,
+        # [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
         filter_widths=[2 for i in range(8)]*3,
         num_decode_steps=16,
         **kwargs

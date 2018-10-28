@@ -11,6 +11,7 @@ from tf_utils import (
 )
 import pdb
 
+
 class DataReader(object):
 
     def __init__(self, data_dir):
@@ -25,13 +26,14 @@ class DataReader(object):
             'test_is_nan'
         ]
         data = [np.load(os.path.join(data_dir, '{}.npy'.format(i))) for i in data_cols]
-
+        # 把原始数据构造成DataFrame 145063
         self.test_df = DataFrame(columns=data_cols, data=data)
+        # 137809  7254 横向切分
         self.train_df, self.val_df = self.test_df.train_test_split(train_size=0.95)
 
-        print ('train size', len(self.train_df))
-        print ('val size', len(self.val_df))
-        print( 'test size', len(self.test_df))
+        print('train size', len(self.train_df))
+        print('val size', len(self.val_df))
+        print('test size', len(self.test_df))
 
     def train_batch_generator(self, batch_size):
         return self.batch_generator(
@@ -61,6 +63,17 @@ class DataReader(object):
         )
 
     def batch_generator(self, batch_size, df, shuffle=True, num_epochs=10000, is_test=False):
+        """
+        从原始数据源dataframe中提取数据，加工成 tf placeholder所需要的内容
+        注意：可以像web traffic 那样placeholder 与原始数据挂钩，然后通过tensor变换
+        生成神经网络需要的数据格式
+        :param batch_size:
+        :param df:
+        :param shuffle:
+        :param num_epochs:
+        :param is_test:
+        :return:
+        """
         batch_gen = df.batch_generator(
             batch_size=batch_size,
             shuffle=shuffle,
@@ -70,29 +83,40 @@ class DataReader(object):
         data_col = 'test_data' if is_test else 'data'
         is_nan_col = 'test_is_nan' if is_test else 'is_nan'
         for batch in batch_gen:
+            # 预测64天
             num_decode_steps = 64
+            # 数据包含的天数
             full_seq_len = batch[data_col].shape[1]
+            # 804-64 如果test:804 train:740
             max_encode_length = full_seq_len - num_decode_steps if not is_test else full_seq_len
-
+            # batch_size*804
             x_encode = np.zeros([len(batch), max_encode_length])
+            # batch_size*64
             y_decode = np.zeros([len(batch), num_decode_steps])
+            # batch_size*804
             is_nan_encode = np.zeros([len(batch), max_encode_length])
+            # batch_size*64
             is_nan_decode = np.zeros([len(batch), num_decode_steps])
-            #[0,0,....,0] batch_size个0
+            # [0,0,....,0] batch_size个0
             encode_len = np.zeros([len(batch)])
             decode_len = np.zeros([len(batch)])
 
             for i, (seq, nan_seq) in enumerate(zip(batch[data_col], batch[is_nan_col])):
+                # [375-740]  365 的区间取随机长度
                 rand_len = np.random.randint(max_encode_length - 365 + 1, max_encode_length + 1)
+                # 训练取随机长度；test取最大长度804
                 x_encode_len = max_encode_length if is_test else rand_len
+                # 从0 开始取随机长度？ 是不是可以改成 随机起点 终点
                 x_encode[i, :x_encode_len] = seq[:x_encode_len]
                 is_nan_encode[i, :x_encode_len] = nan_seq[:x_encode_len]
+                # 记录随机长度
                 encode_len[i] = x_encode_len
                 decode_len[i] = num_decode_steps
                 if not is_test:
+                    # decode 紧邻 encode
                     y_decode[i, :] = seq[x_encode_len: x_encode_len + num_decode_steps]
                     is_nan_decode[i, :] = nan_seq[x_encode_len: x_encode_len + num_decode_steps]
-
+            # place_holder 包含：'page_id','project','access','agent' 不包含：'test_data','test_is_nan','data', 'is_nan',
             batch['x_encode'] = x_encode
             batch['encode_len'] = encode_len
             batch['y_decode'] = y_decode
@@ -102,17 +126,19 @@ class DataReader(object):
 
             yield batch
 
-gal =0
+
 class cnn(TFBaseModel):
 
     def __init__(
-        self,
-        residual_channels=32,
-        skip_channels=32,
-        dilations=[2**i for i in range(8)]*3,
-        filter_widths=[2 for i in range(8)]*3,
-        num_decode_steps=64,
-        **kwargs
+            self,
+            residual_channels=32,
+            skip_channels=32,
+            # 1 2 4 ...128; 共24层
+            dilations=[2 ** i for i in range(8)] * 3,
+            # 全是2
+            filter_widths=[2 for i in range(8)] * 3,
+            num_decode_steps=64,
+            **kwargs
     ):
         self.residual_channels = residual_channels
         self.skip_channels = skip_channels
@@ -122,32 +148,47 @@ class cnn(TFBaseModel):
         super(cnn, self).__init__(**kwargs)
 
     def transform(self, x):
+        """
+        log1p-mean(mean_log1p)
+        :param x:
+        :return:
+        """
         return tf.log(x + 1) - tf.expand_dims(self.log_x_encode_mean, 1)
 
     def inverse_transform(self, x):
+        """
+        对数转回去
+        :param x:
+        :return:
+        """
         return tf.exp(x + tf.expand_dims(self.log_x_encode_mean, 1)) - 1
 
     def get_input_sequences(self):
+        # data 也就是销量
         self.x_encode = tf.placeholder(tf.float32, [None, None])
         self.encode_len = tf.placeholder(tf.int32, [None])
         self.y_decode = tf.placeholder(tf.float32, [None, self.num_decode_steps])
         self.decode_len = tf.placeholder(tf.int32, [None])
+        # is_nan
         self.is_nan_encode = tf.placeholder(tf.float32, [None, None])
         self.is_nan_decode = tf.placeholder(tf.float32, [None, self.num_decode_steps])
-
+        # 其他特征
         self.page_id = tf.placeholder(tf.int32, [None])
         self.project = tf.placeholder(tf.int32, [None])
         self.access = tf.placeholder(tf.int32, [None])
         self.agent = tf.placeholder(tf.int32, [None])
 
+        # dropout
         self.keep_prob = tf.placeholder(tf.float32)
         self.is_training = tf.placeholder(tf.bool)
-
+        # 每行求对数- 再求平均值
         self.log_x_encode_mean = sequence_mean(tf.log(self.x_encode + 1), self.encode_len)
         self.log_x_encode = self.transform(self.x_encode)
+        # 销量的对数
         self.x = tf.expand_dims(self.log_x_encode, 2)
-
+        #  batch ts feature(1+1+1+9+3+2=17）
         self.encode_features = tf.concat([
+            # 是否是Nan,是否是0
             tf.expand_dims(self.is_nan_encode, 2),
             tf.expand_dims(tf.cast(tf.equal(self.x_encode, 0.0), tf.float32), 2),
             tf.tile(tf.reshape(self.log_x_encode_mean, (-1, 1, 1)), (1, tf.shape(self.x_encode)[1], 1)),
@@ -155,8 +196,9 @@ class cnn(TFBaseModel):
             tf.tile(tf.expand_dims(tf.one_hot(self.access, 3), 1), (1, tf.shape(self.x_encode)[1], 1)),
             tf.tile(tf.expand_dims(tf.one_hot(self.agent, 2), 1), (1, tf.shape(self.x_encode)[1], 1)),
         ], axis=2)
-
+        # (batch ,64) 位置信息
         decode_idx = tf.tile(tf.expand_dims(tf.range(self.num_decode_steps), 0), (tf.shape(self.y_decode)[0], 1))
+        # batch,64,features(64,1+9+3+2) 没有is_nan_encode,x_encode
         self.decode_features = tf.concat([
             tf.one_hot(decode_idx, self.num_decode_steps),
             tf.tile(tf.reshape(self.log_x_encode_mean, (-1, 1, 1)), (1, self.num_decode_steps, 1)),
@@ -176,20 +218,21 @@ class cnn(TFBaseModel):
             activation=tf.nn.tanh,
             scope='x-proj-encode'
         )
-
+        # 保存每一步的skip
         skip_outputs = []
+        # 保存每一步的残差
         conv_inputs = [inputs]
         for i, (dilation, filter_width) in enumerate(zip(self.dilations, self.filter_widths)):
             dilated_conv = temporal_convolution_layer(
                 inputs=inputs,
-                output_units=2*self.residual_channels,
+                output_units=2 * self.residual_channels,
                 convolution_width=filter_width,
                 causal=True,
                 dilation_rate=[dilation],
                 scope='dilated-conv-encode-{}'.format(i)
             )
             conv_filter, conv_gate = tf.split(dilated_conv, 2, axis=2)
-            dilated_conv = tf.nn.tanh(conv_filter)*tf.nn.sigmoid(conv_gate)
+            dilated_conv = tf.nn.tanh(conv_filter) * tf.nn.sigmoid(conv_gate)
 
             outputs = time_distributed_dense_layer(
                 inputs=dilated_conv,
@@ -197,11 +240,12 @@ class cnn(TFBaseModel):
                 scope='dilated-conv-proj-encode-{}'.format(i)
             )
             skips, residuals = tf.split(outputs, [self.skip_channels, self.residual_channels], axis=2)
-
+            # 残差网累加作为下一层输入
             inputs += residuals
             conv_inputs.append(inputs)
+            # skip 合并
             skip_outputs.append(skips)
-
+        # skip 合并
         skip_outputs = tf.nn.relu(tf.concat(skip_outputs, axis=2))
         h = time_distributed_dense_layer(skip_outputs, 128, scope='dense-encode-1', activation=tf.nn.relu)
         y_hat = time_distributed_dense_layer(h, 1, scope='dense-encode-2')
@@ -209,6 +253,7 @@ class cnn(TFBaseModel):
         return y_hat, conv_inputs[:-1]
 
     def initialize_decode_params(self, x, features):
+        # 维度一致吗?
         x = tf.concat([x, features], axis=2)
 
         inputs = time_distributed_dense_layer(
@@ -223,14 +268,14 @@ class cnn(TFBaseModel):
         for i, (dilation, filter_width) in enumerate(zip(self.dilations, self.filter_widths)):
             dilated_conv = temporal_convolution_layer(
                 inputs=inputs,
-                output_units=2*self.residual_channels,
+                output_units=2 * self.residual_channels,
                 convolution_width=filter_width,
                 causal=True,
                 dilation_rate=[dilation],
                 scope='dilated-conv-decode-{}'.format(i)
             )
             conv_filter, conv_gate = tf.split(dilated_conv, 2, axis=2)
-            dilated_conv = tf.nn.tanh(conv_filter)*tf.nn.sigmoid(conv_gate)
+            dilated_conv = tf.nn.tanh(conv_filter) * tf.nn.sigmoid(conv_gate)
 
             outputs = time_distributed_dense_layer(
                 inputs=dilated_conv,
@@ -249,21 +294,27 @@ class cnn(TFBaseModel):
         return y_hat
 
     def decode(self, x, conv_inputs, features):
+        """
+        :param x: y_hat_encode
+        :param conv_inputs: conv_inputs
+        :param features: self.decode_features
+        :return:
+        """
         batch_size = tf.shape(x)[0]
-
         # initialize state tensor arrays
         state_queues = []
+        # 1 2 4 ...128;
         for i, (conv_input, dilation) in enumerate(zip(conv_inputs, self.dilations)):
             print('1111111111111111111111_{}'.format(i))
             # batch_size 标量
             batch_idx = tf.range(batch_size)
             # shape:(batch_size,dilation) 例如：dilation =4
             batch_idx = tf.tile(tf.expand_dims(batch_idx, 1), (1, dilation))
-            # -1 reshape 1-D   512
+            # 64 * dilation
             batch_idx = tf.reshape(batch_idx, [-1])
-            # (128) 负数
+            # encode_len=[375,740]
             queue_begin_time = self.encode_len - dilation - 1
-            # (128,1)+(1,4) = (128,4)   例如：[-5., -4., -3., -2.]]
+            # （batch,dilation)
             temporal_idx = tf.expand_dims(queue_begin_time, 1) + tf.expand_dims(tf.range(dilation), 0)
             # 1D  =[512]
             temporal_idx = tf.reshape(temporal_idx, [-1])
@@ -273,6 +324,7 @@ class cnn(TFBaseModel):
             slices = tf.reshape(tf.gather_nd(conv_input, idx), (batch_size, dilation, shape(conv_input, 2)))
 
             layer_ta = tf.TensorArray(dtype=tf.float32, size=dilation + self.num_decode_steps)
+            # 把一个周,分成数组，减掉一个轴
             layer_ta = layer_ta.unstack(tf.transpose(slices, (1, 0, 2)))
             state_queues.append(layer_ta)
 
@@ -303,14 +355,13 @@ class cnn(TFBaseModel):
 
             skip_outputs, updated_queues = [], []
             for i, (conv_input, queue, dilation) in enumerate(zip(conv_inputs, queues, self.dilations)):
-
                 state = queue.read(time)
                 with tf.variable_scope('dilated-conv-decode-{}'.format(i), reuse=True):
                     w_conv = tf.get_variable('weights'.format(i))
                     b_conv = tf.get_variable('biases'.format(i))
                     dilated_conv = tf.matmul(state, w_conv[0, :, :]) + tf.matmul(x_proj, w_conv[1, :, :]) + b_conv
                 conv_filter, conv_gate = tf.split(dilated_conv, 2, axis=1)
-                dilated_conv = tf.nn.tanh(conv_filter)*tf.nn.sigmoid(conv_gate)
+                dilated_conv = tf.nn.tanh(conv_filter) * tf.nn.sigmoid(conv_gate)
 
                 with tf.variable_scope('dilated-conv-proj-decode-{}'.format(i), reuse=True):
                     w_proj = tf.get_variable('weights'.format(i))
@@ -369,14 +420,21 @@ class cnn(TFBaseModel):
         return y_hat
 
     def calculate_loss(self):
+        """
+        训练的入口，计算损失函数
+        :return:
+        """
+        # 销量的对数
         x = self.get_input_sequences()
 
         y_hat_encode, conv_inputs = self.encode(x, features=self.encode_features)
+        # 为什么要初始化参数？x的维度与decode_features不符合
         self.initialize_decode_params(x, features=self.decode_features)
         y_hat_decode = self.decode(y_hat_encode, conv_inputs, features=self.decode_features)
         y_hat_decode = self.inverse_transform(tf.squeeze(y_hat_decode, 2))
+        # 预测值为正数
         y_hat_decode = tf.nn.relu(y_hat_decode)
-
+        # (batch,64)
         self.labels = self.y_decode
         self.preds = y_hat_decode
         self.loss = sequence_smape(self.labels, self.preds, self.decode_len, self.is_nan_decode)
@@ -397,28 +455,33 @@ if __name__ == '__main__':
     dr = DataReader(data_dir=os.path.join(base_dir, 'data/processed/'))
 
     nn = cnn(
+        #
         reader=dr,
         log_dir=os.path.join(base_dir, 'logs'),
         checkpoint_dir=os.path.join(base_dir, 'checkpoints'),
         prediction_dir=os.path.join(base_dir, 'predictions'),
         optimizer='adam',
+        #
         learning_rate=.001,
         batch_size=128,
-        num_training_steps=10,
+        num_training_steps=200000,
         early_stopping_steps=5000,
         warm_start_init_step=0,
+        #
         regularization_constant=0.0,
         keep_prob=1.0,
         enable_parameter_averaging=False,
         num_restarts=2,
         min_steps_to_checkpoint=500,
+        #
         log_interval=10,
         num_validation_batches=1,
         grad_clip=20,
+        # 子类构造属性
         residual_channels=32,
         skip_channels=32,
-        dilations=[2**i for i in range(8)]*3,
-        filter_widths=[2 for i in range(8)]*3,
+        dilations=[2 ** i for i in range(8)] * 3,
+        filter_widths=[2 for i in range(8)] * 3,
         num_decode_steps=64,
     )
     nn.fit()

@@ -6,7 +6,6 @@ from sklearn.model_selection import train_test_split
 
 
 class DataFrame(object):
-
     """Minimal pd.DataFrame analog for handling n-dimensional numpy matrices with additional
     support for shuffling, batching, and train/test splitting.
 
@@ -20,27 +19,34 @@ class DataFrame(object):
 
     def __init__(self, columns, data):
         assert len(columns) == len(data), 'columns length does not match data length'
-
+        # 验证行数相等
         lengths = [mat.shape[0] for mat in data]
         assert len(set(lengths)) == 1, 'all matrices in data must have same first dimension'
-
+        # 行数 145063
         self.length = lengths[0]
+        # data,is_nan,page_id,project,access,agent,test,test_is_nan
         self.columns = columns
         self.data = data
+        # 数据字典
         self.dict = dict(zip(self.columns, self.data))
         self.idx = np.arange(self.length)
 
     def shapes(self):
+        # 每列数据的shape
         return pd.Series(dict(zip(self.columns, [mat.shape for mat in self.data])))
 
     def dtypes(self):
+        # 每列数据的dtype
         return pd.Series(dict(zip(self.columns, [mat.dtype for mat in self.data])))
 
     def shuffle(self):
+        # 改变idx的顺序
         np.random.shuffle(self.idx)
 
     def train_test_split(self, train_size, random_state=np.random.randint(10000)):
+        # 划分训练集 137809 7254
         train_idx, test_idx = train_test_split(self.idx, train_size=train_size, random_state=random_state)
+        # 深度拷贝原矩阵
         train_df = DataFrame(copy.copy(self.columns), [mat[train_idx] for mat in self.data])
         test_df = DataFrame(copy.copy(self.columns), [mat[test_idx] for mat in self.data])
         return train_df, test_df
@@ -50,9 +56,10 @@ class DataFrame(object):
         while epoch_num < num_epochs:
             if shuffle:
                 self.shuffle()
-
+            # 错误 +1
             for i in range(0, self.length + 1, batch_size):
                 batch_idx = self.idx[i: i + batch_size]
+                # 最后一批 <batch
                 if not allow_smaller_final_batch and len(batch_idx) != batch_size:
                     break
                 yield DataFrame(columns=copy.copy(self.columns), data=[mat[batch_idx].copy() for mat in self.data])
@@ -67,6 +74,7 @@ class DataFrame(object):
         return DataFrame(copy.copy(self.columns), [mat[mask] for mat in self.data])
 
     def __iter__(self):
+        # for循环
         return self.dict.items().__iter__()
 
     def __len__(self):
