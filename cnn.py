@@ -164,20 +164,27 @@ class cnn(TFBaseModel):
         return tf.exp(x + tf.expand_dims(self.log_x_encode_mean, 1)) - 1
 
     def get_input_sequences(self):
-        # data 也就是销量
+        """
+        返回log_x_encode
+        :return:
+        """
+        # batch,encode_steps
         self.x_encode = tf.placeholder(tf.float32, [None, None])
+        # batch 每条数据实际长度
         self.encode_len = tf.placeholder(tf.int32, [None])
+        # batch,decode_steps
         self.y_decode = tf.placeholder(tf.float32, [None, self.num_decode_steps])
+        # batch
         self.decode_len = tf.placeholder(tf.int32, [None])
-        # is_nan
+        # batch ,decode_steps
         self.is_nan_encode = tf.placeholder(tf.float32, [None, None])
+        # batch,decode_steps
         self.is_nan_decode = tf.placeholder(tf.float32, [None, self.num_decode_steps])
         # 其他特征
         self.page_id = tf.placeholder(tf.int32, [None])
         self.project = tf.placeholder(tf.int32, [None])
         self.access = tf.placeholder(tf.int32, [None])
         self.agent = tf.placeholder(tf.int32, [None])
-
         # dropout
         self.keep_prob = tf.placeholder(tf.float32)
         self.is_training = tf.placeholder(tf.bool)
@@ -188,18 +195,20 @@ class cnn(TFBaseModel):
         self.x = tf.expand_dims(self.log_x_encode, 2)
         #  batch ts feature(1+1+1+9+3+2=17）
         self.encode_features = tf.concat([
-            # 是否是Nan,是否是0
+            #  nan销量0 1 掩码
             tf.expand_dims(self.is_nan_encode, 2),
+            #  0销量 0 1 掩码
             tf.expand_dims(tf.cast(tf.equal(self.x_encode, 0.0), tf.float32), 2),
             tf.tile(tf.reshape(self.log_x_encode_mean, (-1, 1, 1)), (1, tf.shape(self.x_encode)[1], 1)),
             tf.tile(tf.expand_dims(tf.one_hot(self.project, 9), 1), (1, tf.shape(self.x_encode)[1], 1)),
             tf.tile(tf.expand_dims(tf.one_hot(self.access, 3), 1), (1, tf.shape(self.x_encode)[1], 1)),
             tf.tile(tf.expand_dims(tf.one_hot(self.agent, 2), 1), (1, tf.shape(self.x_encode)[1], 1)),
         ], axis=2)
-        # (batch ,64) 位置信息
+        # (batch ,64) 位置信息(0,1,2,...,num_decode_steps)
         decode_idx = tf.tile(tf.expand_dims(tf.range(self.num_decode_steps), 0), (tf.shape(self.y_decode)[0], 1))
-        # batch,64,features(64,1+9+3+2) 没有is_nan_encode,x_encode
+        # (batch,64,64),features(64,1+9+3+2) 没有is_nan_encode,x_encode
         self.decode_features = tf.concat([
+            # 把每一步独热编码
             tf.one_hot(decode_idx, self.num_decode_steps),
             tf.tile(tf.reshape(self.log_x_encode_mean, (-1, 1, 1)), (1, self.num_decode_steps, 1)),
             tf.tile(tf.expand_dims(tf.one_hot(self.project, 9), 1), (1, self.num_decode_steps, 1)),
@@ -210,6 +219,15 @@ class cnn(TFBaseModel):
         return self.x
 
     def encode(self, x, features):
+        """
+        返回值：
+        y_hat:skip(每次残差) concat后全连接成输出的预测值
+        conv_inputs=[inputs] :每层残差与输入的和 组成的数组（去除最后一层)
+        :param x: log_x_encode 销量的对数
+        :param features: 需要encoding的其他特征
+        :return:
+        """
+        # batch,seq,1+17
         x = tf.concat([x, features], axis=2)
 
         inputs = time_distributed_dense_layer(
@@ -295,8 +313,8 @@ class cnn(TFBaseModel):
 
     def decode(self, x, conv_inputs, features):
         """
-        :param x: y_hat_encode
-        :param conv_inputs: conv_inputs
+        :param x: y_hat_encode  是encode 最后一次输出
+        :param conv_inputs: conv_inputs [input] 每层输入数组 (去除最后一个输出)
         :param features: self.decode_features
         :return:
         """
@@ -314,17 +332,17 @@ class cnn(TFBaseModel):
             batch_idx = tf.reshape(batch_idx, [-1])
             # encode_len=[375,740]
             queue_begin_time = self.encode_len - dilation - 1
-            # （batch,dilation)
+            # （batch,dilation) 最后一个空洞卷积，不包括 最后一个元素
             temporal_idx = tf.expand_dims(queue_begin_time, 1) + tf.expand_dims(tf.range(dilation), 0)
-            # 1D  =[512]
+            # 1D
             temporal_idx = tf.reshape(temporal_idx, [-1])
-            # (512,2)
+            # (512,2) = (batch*dilation ,2)
             idx = tf.stack([batch_idx, temporal_idx], axis=1)
-            # (512,32) gather 行=idx 列 conv_input---->(128,4,32)
+            # (512,32) gather 行=idx 列 conv_input---->(128,4,32) 选择最后 [dilation,1](不包含最后一个)
             slices = tf.reshape(tf.gather_nd(conv_input, idx), (batch_size, dilation, shape(conv_input, 2)))
-
+            # 构造tensorArray 长度 dilation+decode_step
             layer_ta = tf.TensorArray(dtype=tf.float32, size=dilation + self.num_decode_steps)
-            # 把一个周,分成数组，减掉一个轴
+            # 把slice中的数据放到array中 dilation,batch,dim
             layer_ta = layer_ta.unstack(tf.transpose(slices, (1, 0, 2)))
             state_queues.append(layer_ta)
 
@@ -339,13 +357,15 @@ class cnn(TFBaseModel):
         elements_finished = 0 >= self.decode_len
         time = tf.constant(0, dtype=tf.int32)
 
-        # get initial x input
+        # get initial x input (batch,encode_len-1)
         current_idx = tf.stack([tf.range(tf.shape(self.encode_len)[0]), self.encode_len - 1], axis=1)
+        # 使用 最后一个encode
         initial_input = tf.gather_nd(x, current_idx)
 
         def loop_fn(time, current_input, queues):
-            print('222222222222222222222222222222')
+            # 读取decode特征
             current_features = features_ta.read(time)
+            # 特征与当前输入concat
             current_input = tf.concat([current_input, current_features], axis=1)
 
             with tf.variable_scope('x-proj-decode', reuse=True):
@@ -355,8 +375,10 @@ class cnn(TFBaseModel):
 
             skip_outputs, updated_queues = [], []
             for i, (conv_input, queue, dilation) in enumerate(zip(conv_inputs, queues, self.dilations)):
+                # 历史
                 state = queue.read(time)
                 with tf.variable_scope('dilated-conv-decode-{}'.format(i), reuse=True):
+                    # 卷积核
                     w_conv = tf.get_variable('weights'.format(i))
                     b_conv = tf.get_variable('biases'.format(i))
                     dilated_conv = tf.matmul(state, w_conv[0, :, :]) + tf.matmul(x_proj, w_conv[1, :, :]) + b_conv
@@ -397,12 +419,13 @@ class cnn(TFBaseModel):
             return (next_elements_finished, next_input, updated_queues)
 
         def condition(unused_time, elements_finished, *_):
+            # 全True 则False ;否则为True-->也就是每个elements_finished 都True则停止循环
             return tf.logical_not(tf.reduce_all(elements_finished))
 
         def body(time, elements_finished, emit_ta, *state_queues):
-            print("***********************************************")
+            #
             (next_finished, emit_output, state_queues) = loop_fn(time, initial_input, state_queues)
-
+            # 没有完成，返回空
             emit = tf.where(elements_finished, tf.zeros_like(emit_output), emit_output)
             emit_ta = emit_ta.write(time, emit)
 

@@ -49,9 +49,9 @@ class DataReader(object):
         self.num_store_nbr = self.test_df['store_nbr'].max() + 1
         self.num_item_nbr = self.test_df['item_nbr'].max() + 1
 
-        print 'train size', len(self.train_df)
-        print 'val size', len(self.val_df)
-        print 'test size', len(self.test_df)
+        print ('train size', len(self.train_df))
+        print( 'val size', len(self.val_df))
+        print ('test size', len(self.test_df))
 
     def train_batch_generator(self, batch_size):
         return self.batch_generator(

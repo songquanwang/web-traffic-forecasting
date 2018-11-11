@@ -143,7 +143,7 @@ class TFBaseModel(object):
 
                 # 验证数
                 print('******************{0}'.format(step))
-                val_batch_df = val_generator.__next__()
+                val_batch_df = next(val_generator)
 
                 val_feed_dict = {
                     # 对每一个数据列，根据列明找到对应的place_holder feed值

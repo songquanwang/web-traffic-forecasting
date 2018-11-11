@@ -43,12 +43,13 @@ def create_final_csv():
 df = create_final_csv().iloc[0:2048]
 # 日期列
 date_cols = [i for i in df.columns if i != 'Page']
-# url分成四个部分
+# url分成四个部分  国家 网址 代理
 df['name'], df['project'], df['access'], df['agent'] = zip(*df['Page'].apply(parse_page))
 
 # 需要onehot
 le = LabelEncoder()
 df['project'] = le.fit_transform(df['project'])
+# 网址
 df['access'] = le.fit_transform(df['access'])
 df['agent'] = le.fit_transform(df['agent'])
 # page_id 保留序号
